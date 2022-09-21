@@ -1,0 +1,740 @@
+<html>
+<head>
+<title>spotled web bluetooth</title>
+</head>
+<body>
+    <p>
+        <button id="search">Connect Device</button><br />
+        <strong>Connection Status: </strong><span id="connection_status">Disconnected</span>
+    </p>
+    <p>
+        <label>Brightness: <input type="range" id="brightness" min="0" max="100" disabled/></label>
+    </p>
+    <p>
+        <label>Display Mode:
+        <select id="display_mode" disabled>
+            <option selected>NORMAL</option>
+            <option>UPSIDE_DOWN</option>
+            <option>MIRROR</option>
+            <option>MIRROR_UPSIDE_DOWN</option>
+        </select></label>
+    </p>
+<script>
+    function calcChecksum(data) {
+        const v = new Uint8Array(data)
+        let value = BigInt(0)
+        for (let i = 0; i < v.length; i++) {
+            value += BigInt(0xff & v[i])
+        }
+        if (value > 255) {
+            value = (~value) + 1n
+        }
+        return Number(BigInt.asUintN(8, value))
+    }
+
+    class Deferred {
+        constructor() {
+            this.promise = new Promise((resolve, reject)=> {
+                this.reject = reject
+                this.resolve = resolve
+            })
+        }
+    }
+
+    class SendingDataStartCommand {
+        serialNo = 0
+
+        constructor(commandType, commandLength) {
+            this.commandType = commandType
+            this.commandLength = commandLength
+        }
+
+        serialize() {
+            const v = new DataView(new ArrayBuffer(10))
+            v.setUint8(0, 10) // length of header
+            v.setUint8(1, 1) // SendingDataStartCommand
+            v.setUint16(2, this.serialNo)
+            v.setUint16(4, this.commandType)
+            v.setUint32(6, this.commandLength)
+            return v.buffer
+        }
+    }
+
+    class SendingDataFinishCommand {
+        serialNo = 0
+
+        constructor(commandType, commandLength) {
+            this.commandType = commandType
+            this.commandLength = commandLength
+        }
+
+        serialize() {
+            const v = new DataView(new ArrayBuffer(10))
+            v.setUint8(0, 10) // length of header
+            v.setUint8(1, 3) // SendingDataFinishCommand
+            v.setUint16(2, this.serialNo)
+            v.setUint16(4, this.commandType)
+            v.setUint32(6, this.commandLength)
+            return v.buffer
+        }
+    }
+
+    class GetVersionCommand {
+        serialNo = 0
+
+        serialize() {
+            const v = new DataView(new ArrayBuffer(4))
+            v.setUint8(0, 4) // length
+            v.setUint8(1, 16) // GetVersionCommand
+            v.setUint16(2, this.serialNo)
+            return v.buffer
+        }
+    }
+
+    class GetDisplayInfoCommand {
+        serialNo = 0
+
+        serialize() {
+            const v = new DataView(new ArrayBuffer(4))
+            v.setUint8(0, 4) // length
+            v.setUint8(1, 18) // GetDisplayInfoCommand
+            v.setUint16(2, this.serialNo)
+            return v.buffer
+        }
+    }
+
+    class GetBufferSizeCommand {
+        serialNo = 0
+
+        serialize() {
+            const v = new DataView(new ArrayBuffer(4))
+            v.setUint8(0, 4) // length
+            v.setUint8(1, 20) // GetBufferSizeCommand
+            v.setUint16(2, this.serialNo)
+            return v.buffer   
+        }
+    }
+
+    class SendDataCommand {
+        serialNo = 0
+
+        constructor(commandType, payload) {
+            this.commandType = commandType
+            this.payload = payload
+        }
+
+        serialize() {
+            const buffer = new ArrayBuffer(this.payload.byteLength + 15)
+            const v = new DataView(buffer)
+            v.setUint32(0, 15) // length of header
+            v.setUint16(4, this.commandType)
+            v.setUint32(6, this.serialNo)
+            v.setUint32(10, this.payload.byteLength)
+            v.setUint8(14, calcChecksum(buffer.slice(0, 14)))
+            const uint8 = new Uint8Array(buffer)
+            uint8.set(new Uint8Array(this.payload), 15)
+            return buffer
+        }
+    }
+
+    class BrightnessData {
+        constructor(brightness) {
+            this.brightness = brightness
+        }
+
+        serialize() {
+            const v = new DataView(new ArrayBuffer(8))
+            v.setUint32(0, 8) // length
+            v.setUint16(4, 14) // type
+            v.setUint8(6, this.brightness)
+            v.setUint8(7, calcChecksum(v.buffer.slice(0, 8)))
+            return v.buffer
+        }
+    }
+
+    class ScreenModeData {
+        constructor(mode) {
+            switch(mode) {
+                case "NORMAL":
+                    this.mode = 0
+                    break
+                case "UPSIDE_DOWN":
+                    this.mode = 1
+                    break
+                case "MIRROR":
+                    this.mode = 2
+                    break
+                case "MIRROR_UPSIDE_DOWN":
+                    this.mode = 3
+                    break
+                default:
+                    this.mode = mode
+            }
+        }
+
+        serialize() {
+            const v = new DataView(new ArrayBuffer(8))
+            v.setUint32(0, 8) // length
+            v.setUint16(4, 15) // type
+            v.setUint8(6, this.mode)
+            v.setUint8(7, calcChecksum(v.buffer.slice(0, 8)))
+            return v.buffer
+        }
+    }
+
+    class FontData {
+        constructor(fontChars) {
+            this.fontChars = fontChars
+        }
+
+        serialize() {
+            const fontCharData = this.fontChars.map(c => c.serialize())
+            const fontCharDataLen = fontCharData.reduce((sum, char) => sum + char.byteLength, 0)
+            const v = new DataView(new ArrayBuffer(9 + fontCharDataLen))
+            v.setUint32(0, 9) // length
+            v.setUint16(4, 5) // type
+            v.setUint16(6, this.fontChars.length)
+            v.setUint8(8, calcChecksum(v.buffer.slice(0, 8)))
+            const uint8 = new Uint8Array(v.buffer)
+            let offset = 9
+            for (let i = 0; i < fontCharData.length; i++) {
+                uint8.set(new Uint8Array(fontCharData[i]), offset)
+                offset += fontCharData[i].byteLength
+            }
+            return v.buffer
+        }
+    }
+
+    class FontCharacterData {
+        constructor(width, height, character, bitmap) {
+            this.width = width
+            this.height = height
+            this.character = character
+            this.bitmap = bitmap
+        }
+
+        serialize() {
+            const v = new DataView(new ArrayBuffer(this.bitmap.byteLength + 16))
+            v.setUint32(0, this.bitmap.byteLength + 15) // length
+            v.setUint16(4, 13) // type
+            v.setUint8(6, 1)
+            v.setUint16(7, this.width)
+            v.setUint16(9, this.height)
+            v.setUint16(11, this.character.codePointAt(0))
+            v.setUint8(this.bitmap.byteLength)
+            const uint8 = new Uint8Array(v.buffer)
+            uint8.set(new Uint8Array(this.bitmap), 15)
+            v.setUint8(this.bitmap.byteLength + 15, calcChecksum(v.buffer))
+            return v.buffer
+        }
+    }
+
+    class ColorData {
+        constructor(red, green, blue) {
+            this.red = red
+            this.green = green
+            this.blue = blue
+        }
+
+        serialize() {
+            const v = new DataView(new ArrayBuffer(10))
+            v.setUint32(0, 10) // length
+            v.setUint16(4, 2) // type
+            v.setUint8(6, this.red)
+            v.setUint8(7, this.green)
+            v.setUint8(8, this.blue)
+            v.setUint8(9, calcChecksum(v.buffer))
+            return v.buffer
+        }
+    }
+
+    class CharacterData {
+        constructor(char) {
+            this.char = char
+        }
+
+        serialize() {
+            const v = new DataView(new ArrayBuffer(9))
+            v.setUint32(0, 9) // length
+            v.setUint16(4, 3) // type
+            v.setUint16(6, char.codePointAt(0))
+            v.setUint8(8, calcChecksum(v.buffer))
+        }
+    }
+
+    class TextData {
+        constructor(text, speed, effect, colors=null) {
+            this.text = text
+            this.speed = speed
+            this.effect = effect
+            this.colors = colors
+        }
+
+        serialize() {
+            const v = new DataView(new ArrayBuffer(10 + this.text.length*19 + 8 + 10 + 8))
+            const uint8 = new Uint8Array(v.buffer)
+            v.setUint32(0, 10) // length
+            v.setUint16(4, 4) // type
+            v.setUint16(6, this.text.length)
+            v.setUint8(8, 1)
+            v.setUint8(9, calcChecksum(v.buffer.slice(0,9)))
+            
+            for (let i = 0; i < this.text.length; i++) {
+                const ch = this.text[i];
+                const colorData = (colors && colors[i]) || new ColorData(255, 255, 255).serialize()
+                uint8.set(new Uint8Array(colorData), 10 + i*(10+9))
+                uint8.set(new Uint8Array(new CharacterData(ch).serialize()), 20 + i*(10+9))
+            }
+
+            let offset = 20 + this.text.length*(10+9)
+            uint8.set(new Uint8Array(new SpeedData(this.speed).serialize()), offset)
+            uint8.set(new Uint8Array(new TimeData(0).serialize()), offset+8)
+            uint8.set(new Uint8Array(new EffectData(0).serialize()), offset+8+10)
+            return v.buffer
+        }
+    }
+
+    class EffectData {
+        constructor(effect) {
+            this.effect = effect
+        }
+
+        serialize() {
+            const v = new DataView(new ArrayBuffer(8))
+            const uint8 = new Uint8Array(v.buffer)
+            v.setUint32(0, 8) // length
+            v.setUint16(4, 8) // type
+            v.setUint8(6, this.effect)
+            v.setUint8(7, calcChecksum(v.buffer.slice(0,7)))   
+        }
+    }
+
+    class TimeData {
+        constructor(time) {
+            this.time = time
+        }
+
+        serialize() {
+            const v = new DataView(new ArrayBuffer(10))
+            const uint8 = new Uint8Array(v.buffer)
+            v.setUint32(0, 10) // length
+            v.setUint16(4, 7) // type
+            v.setUint8(6, 0)
+            v.setUint16(7, this.time)
+            v.setUint8(9, calcChecksum(v.buffer.slice(0,9)))
+        }
+    }
+
+    class SpeedData {
+        constructor(speed) {
+            this.speed = speed
+        }
+
+        serialize() {
+            const v = new DataView(new ArrayBuffer(8))
+            const uint8 = new Uint8Array(v.buffer)
+            v.setUint32(0, 8) // length
+            v.setUint16(4, 9) // type
+            v.setUint8(6, this.speed)
+            v.setUint8(7, calcChecksum(v.buffer.slice(0,8)))
+        }
+    }
+
+    class GenericCommandResponse {
+        length
+        commandType
+        serialNo
+        errorCode
+        payload
+
+        constructor(data) {
+            let v = data
+            if (!(v instanceof DataView)) {
+                v = new DataView(data)
+            }
+            
+            this.length = v.getUint8(0)
+            this.commandType = v.getUint8(1)
+            this.serialNo = v.getUint16(2)
+            this.errorCode = v.getUint8(4)
+            this.payload = v.buffer.slice(5, this.length + 5)
+        }
+
+        static parseCommand(data) {
+            const genericCommand = new GenericCommandResponse(data)
+
+            switch(genericCommand.commandType) {
+                case 2:
+                    return new SendingDataResponse(data)
+                case 4:
+                    return new SendingDataFinishResponse(data)
+                case 17:
+                    return new VersionResponse(data)
+                case 19:
+                    return new DisplayInfoResponse(data)
+                case 21:
+                    return new BufferSizeResponse(data)
+                case 254:
+                    // error response ?
+                    return genericCommand
+                case 255:
+                    return new ContinueSendingResponse(data)
+                default:
+                    return genericCommand
+            }
+        }
+    }
+
+    class SendingDataResponse extends GenericCommandResponse{
+        constructor(data) {
+            super(data)
+
+            const v = new DataView(this.payload)
+            this.commandType = v.getUint16(0)
+        }
+    }
+
+    class SendingDataFinishResponse extends GenericCommandResponse{
+        constructor(data) {
+            super(data)
+
+            const v = new DataView(this.payload)
+            this.commandType = v.getUint16(0)
+        }
+    }
+
+    class VersionResponse extends GenericCommandResponse {
+        constructor(data) {
+            super(data)
+
+            const v = new DataView(this.payload)
+            this.deviceType = v.getUint16(0)
+            this.deviceRevision = v.getUint32(2)
+            this.softwareRevision = v.getUint32(6)
+        }
+    }
+
+    class DisplayInfoResponse extends GenericCommandResponse {
+        constructor(data) {
+            super(data)
+
+            const v = new DataView(this.payload)
+            this.width = v.getUint16(0)
+            this.height = v.getUint16(2)
+            this.colorDepth = v.getUint8(4)
+            this.frameLimit = v.getUint8(5)
+            this.brightness = v.getUint8(6)
+            this.fontInfo = v.getUint8(7)
+        }
+    }
+
+    class BufferSizeResponse extends GenericCommandResponse {
+        constructor(data) {
+            super(data)
+
+            const v = new DataView(this.payload)
+            this.bufferSize = v.getUint32(0)
+        }
+    }
+
+
+
+    class ContinueSendingResponse extends GenericCommandResponse {
+        constructor(data) {
+            super(data)
+            let v = data
+            if (!(v instanceof DataView)) {
+                v = new DataView(data)
+            }
+            this.errorCode = 0
+            this.commandType = v.getUint16(4)
+            this.continueFrom = v.getUint32(6)
+        }
+    }
+
+    class SpotLEDConnection {
+        #lastCmdSerialNumber = 0
+        #lastDataSerialNumber = 0
+        #commandResponse
+        #gattServer
+        #cmdService
+        #dataService
+
+        constructor(device) {
+            this.device = device
+
+            this.commandResponse = {}
+        }
+
+        async connect() {
+            console.log('Connecting to GATT Server...')
+            this.gattServer = await this.device.gatt.connect();
+
+            console.log('Getting Service...');
+            const service = await this.gattServer.getPrimaryService("0000ff20-0000-1000-8000-00805f9b34fb")
+            
+            console.log('Getting Characteristics...');
+            this.cmdService = await service.getCharacteristic("0000ff21-0000-1000-8000-00805f9b34fb")
+            this.dataService = await service.getCharacteristic("0000ff22-0000-1000-8000-00805f9b34fb")
+
+            await this.cmdService.startNotifications()
+            this.cmdService.oncharacteristicvaluechanged = this.handleCharacteristicValueChanged.bind(this)
+
+            this.displayInfo = await this.queryCommand(new GetDisplayInfoCommand())
+            this.bufferSize = (await this.queryCommand(new GetBufferSizeCommand())).bufferSize
+        }
+
+        nextCmdSerialNumber() {
+            return this.lastCmdSerialNumber = (this.lastCmdSerialNumber + 1) & 0xffff
+        }
+
+        nextDataSerialNumber() {
+            return this.lastDataSerialNumber = (this.lastDataSerialNumber + 1) & 0xffffffff
+        }
+
+        async sendDataInternal(dataCommand) {
+            dataCommand.serialNo = this.nextDataSerialNumber()
+            
+            const payload = dataCommand.serialize()
+            console.log('senddatainternal, payload', payload)
+            const startCommand = new SendingDataStartCommand(dataCommand.commandType, payload.byteLength)
+            const response = await this.queryCommand(startCommand)
+            console.log('senddata start command response', response)
+
+            if (response.errorCode != 0) {
+                throw `senddata error: ${response.errorCode}`
+            }
+
+            const sendSize = 20
+            const unackCount = Math.floor(this.bufferSize / sendSize)
+            let sentPayloads = 0
+
+            for (let i = 0; i < payload.byteLength; i += sendSize) {
+                this.commandResponse[startCommand.serialNo] = new Deferred()
+                console.log(`writing payload bytes ${i}-${i+sendSize}`)
+                await this.dataService.writeValueWithoutResponse(payload.slice(i, i + sendSize))
+                sentPayloads++
+
+                // wait for continue if we have reached maximum number of unacknowledged packets
+                if (sentPayloads >= unackCount) {
+                    sentPayloads = 0
+                    console.log('waiting for continue')
+                    const continueResponse = await this.commandResponse[startCommand.serialNo].promise
+                    console.log('continue from', continueResponse)
+                    i = continueResponse.continueFrom
+                }
+            }
+
+            const finishCommand = new SendingDataFinishCommand(dataCommand.commandType, payload.length)
+            finishCommand.serialNo = startCommand.serialNo
+            return await this.queryCommand(finishCommand)
+        }
+
+        handleCharacteristicValueChanged(e) {
+            console.log('characteristicvaluechanged', e.target.value)
+            const cmdResponse = GenericCommandResponse.parseCommand(e.target.value)
+            console.log('parsed response', cmdResponse)
+            const deferred = this.commandResponse[cmdResponse.serialNo]
+            if (!deferred) {
+                throw "Unhandled response"
+            }
+            delete this.commandResponse[cmdResponse.serialNo]
+            deferred.resolve(cmdResponse)
+        }
+
+        async queryCommand(command) {
+            await this.sendCommand(command)
+            this.commandResponse[command.serialNo] = new Deferred()
+            return this.commandResponse[command.serialNo].promise
+        }
+
+        async sendCommand(command) {
+            if (!this.gattServer || !this.gattServer.connected) {
+                await this.connect()
+            }
+
+            if (!command.serialNo) {
+                command.serialNo = this.nextCmdSerialNumber()
+            }
+            await this.cmdService.writeValueWithoutResponse(command.serialize())
+        }
+    }
+
+    class Font {
+        constructor(fontData) {
+            this.fontData = fontData
+        }
+
+        getChar(char) {
+            if (char in this.fontData) {
+                return this.fontData[char]
+            }
+            if ('\ufffd' in this.fontData) {
+                return this.fontData['\ufffd']
+            }
+            if ('\x00' in this.fontData) {
+                return this.fontData['\x00']
+            }
+            return this.fontData[' ']
+        }
+
+        createBitmap(charData, minLen) {
+
+            if (minLen % 8 != 0) {
+                minLen += 8 - (minLen % 8)
+            }
+            
+            const trueChar = '@'
+            const bitmap = new Uint8Array(new ArrayBuffer(charData.length))
+            for (let i = 0; i < charData.length; i++) {
+                if (charData[i].length < minLen) {
+                    charData[i] = charData[i].padEnd('.', minLen)
+                } else {
+                    excess = charData[i].length % 8
+                    if (excess != 0) {
+                        charData[i] += '.'.repeat(8 - excess)
+                    }
+                }
+
+                for (let j = 0; j < charData[i].length; j += 8) {
+                    bitmap[i] = ((charData[i][j] == trueChar) << 7) |
+                        ((charData[i][j+1] == trueChar) << 6) |
+                        ((charData[i][j+2] == trueChar) << 5) |
+                        ((charData[i][j+3] == trueChar) << 4) |
+                        ((charData[i][j+4] == trueChar) << 3) |
+                        ((charData[i][j+5] == trueChar) << 2) |
+                        ((charData[i][j+6] == trueChar) << 1) |
+                        (charData[i][j+7] == trueChar);
+                }
+            } 
+            return bitmap;
+        }
+
+        createFontCharacters(text, minHeight=12) {
+            const characters = []
+            for (let i = 0; i < text.length; i++) {
+                const char = text[i]
+                const charData = this.getChar(char)
+                let height = charData.length
+                let width = charData[0].length
+                if (height < minHeight) {
+                    // todo: pad_character_to_height
+                    height = minHeight
+                }
+                if (width < height) {
+                    width = height
+                }
+                characters.push(new FontCharacterData(width, height, char, this.createBitmap(charData, width)))
+            }
+            return characters
+        }
+
+        static parseYaffFont(text) {
+            const lines = text.split('\n')
+            const fontData = {}
+            let currentChar = null
+            let lineAcc = []
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim()
+                if (line.startsWith('#')) {
+                    continue
+                }
+                if (line.endsWith(':') && (line.startsWith('0x') || line.startsWith('u+'))) {
+                    if (currentChar) {
+                        fontData[currentChar] = lineAcc
+                        lineAcc = []
+                    }
+                    currentChar = String.fromCodePoint(parseInt(line.slice(2, line.length-1), 16))
+                } else if (!line.includes(':') && (line.includes('.') || line.includes('@'))) {
+                    lineAcc.push(line)
+                }
+            }
+            if (currentChar) {
+                fontData[currentChar] = lineAcc
+            }
+            return new Font(fontData)
+        }
+    }
+
+    
+    class SpotLED {
+        constructor(device) {
+            this.connection = new SpotLEDConnection(device)
+            this.fonts = {}
+        }
+
+        async connect() {           
+            return await this.connection.connect()
+        }
+
+        async loadFont(fontUrl) {
+            if (this.fonts[fontUrl]) {
+                return this.fonts[fontUrl]
+            }
+            
+            const text = await fetch(fontUrl).then(response => response.text())
+            const font = Font.parseYaffFont(text)
+            this.fonts[fontUrl] = font
+            return font
+        }
+
+        async setBrightness(brightness) {
+            if (!this.connection) {
+                throw "Not connected"
+            }
+
+            await this.connection.sendDataInternal(new SendDataCommand(32772, new BrightnessData(brightness).serialize()))
+        }
+
+        async setScreenMode(mode) {
+            await this.connection.sendDataInternal(new SendDataCommand(32772, new ScreenModeData(mode).serialize()))
+        }
+
+        async setTextByChars(text) {
+            const font = await this.loadFont('fonts/6x10.yaff')
+            const fontCharacters = font.createFontCharacters(text, this.connection.displayInfo.height)
+            await this.connection.sendDataInternal(new SendDataCommand(32772, new FontData(fontCharacters).serialize()))
+            await this.connection.sendDataInternal(new SendDataCommand(32772, new TextData(text, 0, "SCROLL_LEFT").serialize()))
+        }   
+    }
+
+    let led = null
+
+    document.querySelector('#brightness').addEventListener('change', async (e) => {
+        console.log('set brightness', e.target.value)
+        await led.setBrightness(e.target.value)
+    })
+    
+    document.querySelector('#display_mode').addEventListener('change', async (e) => {
+        console.log('display_mode', e.target.value)
+        await led.setScreenMode(e.target.value)
+    })
+
+    document.querySelector('#search').addEventListener('click', async (e) => {
+        console.log('Requesting Bluetooth Device...');
+        const device = await navigator.bluetooth.requestDevice({
+            filters: [
+                { namePrefix: "SpotLED" },
+            ],
+            optionalServices: [parseInt("0xff20")]
+        })
+        device.ongattserverdisconnected = ()=> {
+            console.log('gatt server disconnected')
+            document.querySelector('#connection_status').textContent = `Disconnected from ${device.name}`
+        }
+        
+        led = new SpotLED(device)
+        await led.connect()
+        document.querySelector('#connection_status').textContent = `Connected to ${device.name}`
+        document.querySelector('#brightness').value = led.connection.displayInfo.brightness
+        document.querySelector('#brightness').disabled = false
+        document.querySelector('#display_mode').disabled = false
+
+        // led.setTextByChars('abc')
+    })
+
+    document.addEventListener('DOMContentLoaded', async (e) => {
+        
+    })
+</script>
+</body>
