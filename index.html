@@ -1,11 +1,17 @@
 <html>
 <head>
 <title>spotled web bluetooth</title>
+<style>
+    body {
+        font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+</style>
 </head>
 <body>
     <p>
         <button id="search">Connect Device</button><br />
-        <strong>Connection Status: </strong><span id="connection_status">Disconnected</span>
+        <strong>Connection Status: </strong><span id="connection_status">Disconnected</span><br />
+        <strong>Display Info: </strong><span id="display_info"></span>
     </p>
     <p>
         <label>Brightness: <input type="range" id="brightness" min="0" max="100" disabled/></label>
@@ -18,6 +24,14 @@
             <option>MIRROR</option>
             <option>MIRROR_UPSIDE_DOWN</option>
         </select></label>
+    </p>
+    <p><label>Set Text <input id="text" type="text" value="abc" /></label><button id="set_text" disabled>Set Text</button><button id="clear" disabled>Clear</button></p>
+    <p>
+        <canvas id="canvas" style="image-rendering: pixelated; border: 1px solid; width:100%" width="48" height="12"></canvas><br/>
+        <button id="set_image">Set Image</button><button id="set_time">Set Time</button>
+    </p>
+    <p>
+        <canvas id="canvas2" style="image-rendering: pixelated; border: 1px solid; width:100%" width="48" height="12"></canvas>
     </p>
 <script>
     function calcChecksum(data) {
@@ -189,6 +203,7 @@
 
         serialize() {
             const fontCharData = this.fontChars.map(c => c.serialize())
+            console.log('fontCharData', fontCharData)
             const fontCharDataLen = fontCharData.reduce((sum, char) => sum + char.byteLength, 0)
             const v = new DataView(new ArrayBuffer(9 + fontCharDataLen))
             v.setUint32(0, 9) // length
@@ -214,17 +229,17 @@
         }
 
         serialize() {
-            const v = new DataView(new ArrayBuffer(this.bitmap.byteLength + 16))
+            const v = new DataView(new ArrayBuffer(this.bitmap.byteLength + 15))
             v.setUint32(0, this.bitmap.byteLength + 15) // length
             v.setUint16(4, 13) // type
             v.setUint8(6, 1)
             v.setUint16(7, this.width)
             v.setUint16(9, this.height)
             v.setUint16(11, this.character.codePointAt(0))
-            v.setUint8(this.bitmap.byteLength)
+            v.setUint8(13, this.bitmap.byteLength)
             const uint8 = new Uint8Array(v.buffer)
-            uint8.set(new Uint8Array(this.bitmap), 15)
-            v.setUint8(this.bitmap.byteLength + 15, calcChecksum(v.buffer))
+            uint8.set(new Uint8Array(this.bitmap), 14)
+            v.setUint8(this.bitmap.byteLength + 14, calcChecksum(v.buffer))
             return v.buffer
         }
     }
@@ -257,8 +272,9 @@
             const v = new DataView(new ArrayBuffer(9))
             v.setUint32(0, 9) // length
             v.setUint16(4, 3) // type
-            v.setUint16(6, char.codePointAt(0))
+            v.setUint16(6, this.char.codePointAt(0))
             v.setUint8(8, calcChecksum(v.buffer))
+            return v.buffer
         }
     }
 
@@ -281,15 +297,31 @@
             
             for (let i = 0; i < this.text.length; i++) {
                 const ch = this.text[i];
-                const colorData = (colors && colors[i]) || new ColorData(255, 255, 255).serialize()
+                const colorData = (this.colors && this.colors[i]) || new ColorData(255, 255, 255).serialize()
                 uint8.set(new Uint8Array(colorData), 10 + i*(10+9))
                 uint8.set(new Uint8Array(new CharacterData(ch).serialize()), 20 + i*(10+9))
             }
 
-            let offset = 20 + this.text.length*(10+9)
+            let offset = 10 + this.text.length*(10+9)
             uint8.set(new Uint8Array(new SpeedData(this.speed).serialize()), offset)
             uint8.set(new Uint8Array(new TimeData(0).serialize()), offset+8)
-            uint8.set(new Uint8Array(new EffectData(0).serialize()), offset+8+10)
+            uint8.set(new Uint8Array(new EffectData(0).serialize()), offset+8+10) // TODO
+            return v.buffer
+        }
+    }
+
+    class TimeData {
+        constructor(time) {
+            this.time = time
+        }
+
+        serialize() {
+            const v = new DataView(new ArrayBuffer(10))
+            v.setUint32(0, 10) // length
+            v.setUint16(4, 7) // type
+            v.setUint8(6, 0)
+            v.setUint16(7, this.time)
+            v.setUint8(9, calcChecksum(v.buffer.slice(0,9)))
             return v.buffer
         }
     }
@@ -301,27 +333,11 @@
 
         serialize() {
             const v = new DataView(new ArrayBuffer(8))
-            const uint8 = new Uint8Array(v.buffer)
             v.setUint32(0, 8) // length
             v.setUint16(4, 8) // type
             v.setUint8(6, this.effect)
-            v.setUint8(7, calcChecksum(v.buffer.slice(0,7)))   
-        }
-    }
-
-    class TimeData {
-        constructor(time) {
-            this.time = time
-        }
-
-        serialize() {
-            const v = new DataView(new ArrayBuffer(10))
-            const uint8 = new Uint8Array(v.buffer)
-            v.setUint32(0, 10) // length
-            v.setUint16(4, 7) // type
-            v.setUint8(6, 0)
-            v.setUint16(7, this.time)
-            v.setUint8(9, calcChecksum(v.buffer.slice(0,9)))
+            v.setUint8(7, calcChecksum(v.buffer.slice(0,7)))
+            return v.buffer
         }
     }
 
@@ -332,11 +348,63 @@
 
         serialize() {
             const v = new DataView(new ArrayBuffer(8))
-            const uint8 = new Uint8Array(v.buffer)
             v.setUint32(0, 8) // length
             v.setUint16(4, 9) // type
             v.setUint8(6, this.speed)
             v.setUint8(7, calcChecksum(v.buffer.slice(0,8)))
+            return v.buffer
+        }
+    }
+
+    class AnimationData {
+        constructor(frames, time, speed, effect) {
+            this.frames = frames
+            this.time = time
+            this.speed = speed
+            this.effect = effect
+        }
+
+        serialize() {
+            const frameData = this.frames.map(c => c.serialize())
+            console.log('frameData', frameData)
+            const frameDataLen = frameData.reduce((sum, frame) => sum + frame.byteLength, 0)
+            const v = new DataView(new ArrayBuffer(9 + frameDataLen + 10 + 8 + 8))
+            const uint8 = new Uint8Array(v.buffer)
+            v.setUint32(0, 9) // length
+            v.setUint16(4, 11) // type
+            v.setUint16(6, this.frames.length)
+            v.setUint8(8, calcChecksum(v.buffer.slice(0,8)))
+            let offset = 9
+            for (let i = 0; i < frameData.length; i++) {
+                uint8.set(new Uint8Array(frameData[i]), offset)
+                offset += frameData[i].byteLength
+            }
+            uint8.set(new Uint8Array(new TimeData(this.time).serialize()), offset)
+            uint8.set(new Uint8Array(new SpeedData(this.speed).serialize()), offset+10)
+            uint8.set(new Uint8Array(new EffectData(this.effect).serialize()), offset+8+10) // TODO
+            return v.buffer
+        }
+    }
+
+    class FrameData {
+        constructor(width, height, bitmap, depth=1) {
+            this.width = width
+            this.height = height
+            this.bitmap = bitmap
+            this.depth = depth
+        }
+
+        serialize() {
+            const v = new DataView(new ArrayBuffer(12 + this.bitmap.byteLength))
+            const uint8 = new Uint8Array(v.buffer)
+            v.setUint32(0, 12 + this.bitmap.byteLength) // length
+            v.setUint16(4, 96) // type
+            v.setUint16(6, this.width)
+            v.setUint16(8, this.height)
+            v.setUint8(10, this.depth)
+            uint8.set(new Uint8Array(this.bitmap), 11)
+            v.setUint8(11 + this.bitmap.byteLength, calcChecksum(v.buffer))
+            return v.buffer
         }
     }
 
@@ -521,7 +589,7 @@
                     console.log('waiting for continue')
                     const continueResponse = await this.commandResponse[startCommand.serialNo].promise
                     console.log('continue from', continueResponse)
-                    i = continueResponse.continueFrom
+                    i = continueResponse.continueFrom - sendSize // since sendSize is added at end
                 }
             }
 
@@ -579,7 +647,6 @@
         }
 
         createBitmap(charData, minLen) {
-
             if (minLen % 8 != 0) {
                 minLen += 8 - (minLen % 8)
             }
@@ -606,7 +673,8 @@
                         ((charData[i][j+6] == trueChar) << 1) |
                         (charData[i][j+7] == trueChar);
                 }
-            } 
+            }
+            console.log('bitmap', charData, bitmap)
             return bitmap;
         }
 
@@ -614,19 +682,37 @@
             const characters = []
             for (let i = 0; i < text.length; i++) {
                 const char = text[i]
-                const charData = this.getChar(char)
+                let charData = this.getChar(char)
                 let height = charData.length
                 let width = charData[0].length
                 if (height < minHeight) {
-                    // todo: pad_character_to_height
+                    charData = Font.padCharacterToHeight(charData, minHeight, width)
                     height = minHeight
                 }
-                if (width < height) {
-                    width = height
-                }
+                // if (width < height) {
+                //     width = height
+                // }
                 characters.push(new FontCharacterData(width, height, char, this.createBitmap(charData, width)))
             }
             return characters
+        }
+
+        static padCharacterToHeight(charData, minHeight, minLength=0) {
+            const newCharData = [...charData]
+            const height = charData.length
+            const fillerLine = ''.padEnd(minLength, '.')
+            if (height < minHeight) {
+                const diff = minHeight - height
+                const prependRows = (Math.floor(diff / 2) + diff % 2)
+                const appendRows = (Math.floor(diff / 2))
+                for (let i = 0; i < prependRows; i++) {
+                    newCharData.unshift(fillerLine)                    
+                }
+                for (let i = 0; i < appendRows; i++) {
+                    newCharData.push(fillerLine)                    
+                }
+            }
+            return newCharData
         }
 
         static parseYaffFont(text) {
@@ -695,10 +781,149 @@
             const fontCharacters = font.createFontCharacters(text, this.connection.displayInfo.height)
             await this.connection.sendDataInternal(new SendDataCommand(32772, new FontData(fontCharacters).serialize()))
             await this.connection.sendDataInternal(new SendDataCommand(32772, new TextData(text, 0, "SCROLL_LEFT").serialize()))
-        }   
+        }
+
+        async setAnimation(bitmaps, time=0, speed=0, effects=0) {
+            const frames = bitmaps.map(bitmap => new FrameData(this.connection.displayInfo.width, this.connection.displayInfo.height, bitmap))
+            await this.connection.sendDataInternal(new SendDataCommand(32772, new AnimationData(frames, time, speed, effects).serialize()))
+        }
+
+        async setBitmap(bitmap) {
+            const frames = [new FrameData(this.connection.displayInfo.width, this.connection.displayInfo.height, bitmap)]
+            await this.connection.sendDataInternal(new SendDataCommand(32772, new AnimationData(frames, 0, 0, 0).serialize()))
+        }
+
+        async clearDisplay() {
+            const bitmap = new Uint8Array(Math.floor(this.connection.displayInfo.width * this.connection.displayInfo.height / 8))
+            bitmap.fill(0x00)
+            const frames = [new FrameData(this.connection.displayInfo.width, this.connection.displayInfo.height, bitmap)]
+            await this.connection.sendDataInternal(new SendDataCommand(32772, new AnimationData(frames, 0, 0, 0).serialize()))
+        }
     }
 
     let led = null
+    const canvas = document.querySelector('#canvas')
+    const canvasctx = canvas.getContext('2d')
+    canvasctx.imageSmoothingEnabled = false
+    let isDrawing = false
+    let x = 0
+    let y = 0
+
+    document.querySelector('#canvas').addEventListener('mousedown', (e) => {
+        x = e.offsetX
+        y = e.offsetY
+        isDrawing = true
+    })
+
+    document.querySelector('#canvas').addEventListener('mousemove', (e) => {
+        if (isDrawing) {
+            drawLine(canvasctx, x, y, e.offsetX, e.offsetY)
+            x = e.offsetX
+            y = e.offsetY
+        }
+    })
+
+    document.addEventListener('mouseup', (e) => {
+        if (isDrawing) {
+            drawLine(canvasctx, x, y, e.offsetX, e.offsetY)
+            x = 0;
+            y = 0;
+            isDrawing = false;
+        }
+    })
+
+    document.querySelector('#canvas').addEventListener('blur', (e) => {
+        isDrawing = false;
+    })
+
+    function drawLine(context, x1, y1, x2, y2) {
+        // scale values
+        scaleX = canvas.offsetWidth / canvas.width
+        scaleY = canvas.offsetHeight / canvas.height
+        x1 = x1 / scaleX
+        x2 = x2 / scaleX
+        y1 = y1 / scaleY
+        y2 = y2 / scaleY
+        
+        context.beginPath();
+        context.strokeStyle = 'black';
+        context.lineWidth = 1;
+        context.moveTo(x1, y1);
+        context.lineTo(x2, y2);
+        context.stroke();
+        context.closePath();
+    }
+
+    document.querySelector('#set_image').addEventListener('click', async (e) => {
+        e.preventDefault()
+        const imageData = canvasctx.getImageData(0, 0, canvas.width, canvas.height)
+        const bitmapData = new Uint8Array(new ArrayBuffer(canvas.width * canvas.height / 8))
+
+        // greyscale thresholding
+        const data = imageData.data
+        for (let i = 0; i < data.length; i++) {    
+            const dataOffset = i*4       
+            const bitmapOffset = Math.floor(i / 8)
+            const bitmapBitOffset = 7 - (i % 8)
+            if (data[dataOffset+3] < 90) { // for some reason we only draw dataOffsetn alpha channel?
+                data[dataOffset] = 255
+                data[dataOffset+1] = 255
+                data[dataOffset+2] = 255
+                data[dataOffset+3] = 0
+                bitmapData[bitmapOffset] = bitmapData[bitmapOffset] & ~(1<<bitmapBitOffset)
+            } else {
+                data[dataOffset] = 0
+                data[dataOffset+1] = 0
+                data[dataOffset+2] = 0
+                data[dataOffset+3] = 255
+                bitmapData[bitmapOffset] = bitmapData[bitmapOffset] | (1<<bitmapBitOffset)
+            }
+        }
+
+        canvasctx.putImageData(imageData, 0, 0)
+        await led.setBitmap(bitmapData)
+    })
+
+    document.querySelector('#set_time').addEventListener('click', async (e) => {
+        const text = (new Date()).toLocaleString()
+        const canvas2 = document.querySelector('#canvas2')
+        canvas2.style.letterSpacing = '-1px'
+        const ctx = canvas2.getContext('2d')
+        canvas2.height = 12
+        ctx.font="normal 14px 'Comic Sans MS'"
+        ctx.textBaseline="top"
+        const textMeasurement = ctx.measureText(text)
+        canvas2.width = textMeasurement.width
+        canvas2.style.letterSpacing = '-1px'
+        ctx.fillstyle="black"
+        ctx.font="normal 14px 'Comic Sans MS'"
+        ctx.textBaseline="top"
+        ctx.fillText(text, 0, 1)
+        if (!led) {
+            return
+        }
+
+        const frames = []
+        for (let x = 0; x < canvas2.width; x += 48) {
+            const bitmapData = new Uint8Array(new ArrayBuffer(canvas.width * canvas.height / 8))
+
+            // greyscale thresholding
+            const imageData = ctx.getImageData(x, 0, canvas.width, canvas.height)
+            const data = imageData.data
+            for (let i = 0; i < data.length; i++) {    
+                const dataOffset = i*4
+                const bitmapOffset = Math.floor(i / 8)
+                const bitmapBitOffset = 7 - (i % 8)
+                if (data[dataOffset+3] < 95) { // for some reason we only draw dataOffsetn alpha channel?
+                    bitmapData[bitmapOffset] = bitmapData[bitmapOffset] & ~(1<<bitmapBitOffset)
+                } else {
+                    bitmapData[bitmapOffset] = bitmapData[bitmapOffset] | (1<<bitmapBitOffset)
+                }
+            }
+            frames.push(bitmapData)
+        }
+        await led.setAnimation(frames, 1000, 50, 3)
+    })
 
     document.querySelector('#brightness').addEventListener('change', async (e) => {
         console.log('set brightness', e.target.value)
@@ -708,6 +933,17 @@
     document.querySelector('#display_mode').addEventListener('change', async (e) => {
         console.log('display_mode', e.target.value)
         await led.setScreenMode(e.target.value)
+    })
+
+    document.querySelector('#set_text').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await led.setTextByChars(document.querySelector('#text').value)
+    })
+
+    document.querySelector('#clear').addEventListener('click', async (e) => {
+        e.preventDefault()
+        canvasctx.clearRect(0, 0, canvas.width, canvas.height)
+        await led.clearDisplay()
     })
 
     document.querySelector('#search').addEventListener('click', async (e) => {
@@ -726,15 +962,14 @@
         led = new SpotLED(device)
         await led.connect()
         document.querySelector('#connection_status').textContent = `Connected to ${device.name}`
+        document.querySelector('#display_info').textContent = `${led.connection.displayInfo.width}x${led.connection.displayInfo.height}`
+        canvas.width = led.connection.displayInfo.width
+        canvas.height = led.connection.displayInfo.height 
         document.querySelector('#brightness').value = led.connection.displayInfo.brightness
         document.querySelector('#brightness').disabled = false
         document.querySelector('#display_mode').disabled = false
-
-        // led.setTextByChars('abc')
-    })
-
-    document.addEventListener('DOMContentLoaded', async (e) => {
-        
+        document.querySelector('#set_text').disabled = false
+        document.querySelector('#clear').disabled = false
     })
 </script>
 </body>
