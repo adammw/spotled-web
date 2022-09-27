@@ -29,7 +29,8 @@
     <p><label>Set Text <input id="text" type="text" value="abc" /></label><button id="set_text" disabled>Set Text</button><button id="clear" disabled>Clear</button></p>
     <p>
         <canvas id="canvas" style="image-rendering: pixelated; border: 1px solid; width:100%" width="48" height="12"></canvas><br/>
-        <button id="set_image">Set Image</button><button id="clear_canvas">Clear</button>
+        <label>Threshold Value <input type="range" min="0" max="255" value="120" id="threshold"></label><br>
+        <input id="upload" type="file" accept="image/*" capture><button id="set_image">Set Image</button><button id="clear_canvas">Clear</button>
     </p>
     <p>
         <canvas id="canvas2" style="image-rendering: pixelated; border: 1px solid; width:100%" width="48" height="12"></canvas><br/>
@@ -368,7 +369,6 @@
 
         serialize() {
             const frameData = this.frames.map(c => c.serialize())
-            console.log('frameData', frameData)
             const frameDataLen = frameData.reduce((sum, frame) => sum + frame.byteLength, 0)
             const v = new DataView(new ArrayBuffer(9 + frameDataLen + 10 + 8 + 8))
             const uint8 = new Uint8Array(v.buffer)
@@ -816,7 +816,43 @@
     let x = 0
     let y = 0
 
-    document.querySelector('#canvas').addEventListener('pointerdown', (e) => {
+    function loadFile(file) {
+        const deferred = new Deferred()
+        const img = document.createElement('img')
+        img.onerror = (e) => deferred.reject(e)
+        img.onload = (e) => {
+            canvasctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+            thresholdCanvas(canvasctx, canvas.width, canvas.height)
+            deferred.resolve()
+        }
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            img.src = e.target.result
+        }
+        reader.onerror = (e) => deferred.reject(e)
+        reader.readAsDataURL(file)
+        return deferred.promise
+    }
+
+    canvas.addEventListener("dragenter", (e) => {
+        e.dataTransfer.types.includes("Files") && e.preventDefault()
+    })
+
+    canvas.addEventListener("dragover", (e) => {
+        e.dataTransfer.types.includes("Files") && e.preventDefault()
+    })
+
+    canvas.addEventListener('drop', async (e) => {
+        for (let i = 0; i < e.dataTransfer.files.length; i++) {
+            const file = e.dataTransfer.files[i];
+            if(file.type.startsWith('image/')) {
+                e.preventDefault()
+                await loadFile(file)
+            }
+        }
+    })
+
+    canvas.addEventListener('pointerdown', (e) => {
         e.preventDefault()
         x = e.offsetX
         y = e.offsetY
@@ -833,18 +869,18 @@
         drawPixel(canvasctx, x, y, canvasctx.strokeStyle)
     })
 
-    document.querySelector('#canvas').addEventListener('contextmenu', (e) => {
+    canvas.addEventListener('contextmenu', (e) => {
         e.preventDefault()
     })
 
 
-    document.querySelector('#canvas').addEventListener('touchmove', (e) => {
+    canvas.addEventListener('touchmove', (e) => {
         if (isDrawing || isErasing) {
             e.preventDefault()
         }
     })
 
-    document.querySelector('#canvas').addEventListener('pointermove', (e) => {
+    canvas.addEventListener('pointermove', (e) => {
         if (isDrawing || isErasing) {
             e.preventDefault()
             drawLine(canvasctx, x, y, e.offsetX, e.offsetY)
@@ -871,10 +907,10 @@
     })
 
     function rgbaThreshold(data, offset) {
-        return data[offset+3] < 90 || // alpha channel is transparent OR
-            (data[offset] + data[offset+1] + data[offset+2]) / 3 > 150 // rgb avg > 150
+        const threshold = document.querySelector('#threshold').value
+        return data[offset+3] < (255-threshold) || // alpha channel is transparent OR
+            (data[offset] + data[offset+1] + data[offset+2]) / 3 > threshold // rgb avg > threshold
     }
-
 
     function thresholdCanvas(ctx, width, height) {
         const imageData = ctx.getImageData(0, 0, width, height)
@@ -940,6 +976,10 @@
         context.fillStyle = style
         context.fillRect(Math.floor(x / scaleX),Math.floor(y / scaleY),1,1)
     }
+
+    document.querySelector('#upload').addEventListener('change', async (e) => {
+        await loadFile(e.target.files[0])
+    })
 
     document.querySelector('#set_image').addEventListener('click', async (e) => {
         e.preventDefault()
