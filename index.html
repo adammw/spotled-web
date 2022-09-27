@@ -9,7 +9,7 @@
 </style>
 </head>
 <body>
-    <p> 
+    <p>
         <strong>Connection Status: </strong><span id="connection_status">Disconnected</span>
         <button id="search">Connect Device</button><br />
         <strong>Display Info: </strong><span id="display_info"></span>
@@ -127,7 +127,7 @@
             v.setUint8(0, 4) // length
             v.setUint8(1, 20) // GetBufferSizeCommand
             v.setUint16(2, this.serialNo)
-            return v.buffer   
+            return v.buffer
         }
     }
 
@@ -296,7 +296,7 @@
             v.setUint16(6, this.text.length)
             v.setUint8(8, 1)
             v.setUint8(9, calcChecksum(v.buffer.slice(0,9)))
-            
+
             for (let i = 0; i < this.text.length; i++) {
                 const ch = this.text[i];
                 const colorData = (this.colors && this.colors[i]) || new ColorData(255, 255, 255).serialize()
@@ -422,7 +422,7 @@
             if (!(v instanceof DataView)) {
                 v = new DataView(data)
             }
-            
+
             this.length = v.getUint8(0)
             this.commandType = v.getUint8(1)
             this.serialNo = v.getUint16(2)
@@ -542,7 +542,7 @@
 
             console.log('Getting Service...');
             const service = await this.gattServer.getPrimaryService("0000ff20-0000-1000-8000-00805f9b34fb")
-            
+
             console.log('Getting Characteristics...');
             this.cmdService = await service.getCharacteristic("0000ff21-0000-1000-8000-00805f9b34fb")
             this.dataService = await service.getCharacteristic("0000ff22-0000-1000-8000-00805f9b34fb")
@@ -564,7 +564,7 @@
 
         async sendDataInternal(dataCommand) {
             dataCommand.serialNo = this.nextDataSerialNumber()
-            
+
             const payload = dataCommand.serialize()
             console.log('senddatainternal, payload', payload)
             const startCommand = new SendingDataStartCommand(dataCommand.commandType, payload.byteLength)
@@ -652,7 +652,7 @@
             if (minLen % 8 != 0) {
                 minLen += 8 - (minLen % 8)
             }
-            
+
             const trueChar = '@'
             const bitmap = new Uint8Array(new ArrayBuffer(charData.length))
             for (let i = 0; i < charData.length; i++) {
@@ -708,10 +708,10 @@
                 const prependRows = (Math.floor(diff / 2) + diff % 2)
                 const appendRows = (Math.floor(diff / 2))
                 for (let i = 0; i < prependRows; i++) {
-                    newCharData.unshift(fillerLine)                    
+                    newCharData.unshift(fillerLine)
                 }
                 for (let i = 0; i < appendRows; i++) {
-                    newCharData.push(fillerLine)                    
+                    newCharData.push(fillerLine)
                 }
             }
             return newCharData
@@ -744,14 +744,14 @@
         }
     }
 
-    
+
     class SpotLED {
         constructor(device) {
             this.connection = new SpotLEDConnection(device)
             this.fonts = {}
         }
 
-        async connect() {           
+        async connect() {
             return await this.connection.connect()
         }
 
@@ -759,7 +759,7 @@
             if (this.fonts[fontUrl]) {
                 return this.fonts[fontUrl]
             }
-            
+
             const text = await fetch(fontUrl).then(response => response.text())
             const font = Font.parseYaffFont(text)
             this.fonts[fontUrl] = font
@@ -818,7 +818,6 @@
 
     document.querySelector('#canvas').addEventListener('pointerdown', (e) => {
         e.preventDefault()
-        console.log(e)
         x = e.offsetX
         y = e.offsetY
         isDrawing = (e.button == 0)
@@ -844,7 +843,7 @@
             e.preventDefault()
         }
     })
-    
+
     document.querySelector('#canvas').addEventListener('pointermove', (e) => {
         if (isDrawing || isErasing) {
             e.preventDefault()
@@ -871,16 +870,22 @@
         isDrawing = false;
     })
 
+    function rgbaThreshold(data, offset) {
+        return data[offset+3] < 90 || // alpha channel is transparent OR
+            (data[offset] + data[offset+1] + data[offset+2]) / 3 > 150 // rgb avg > 150
+    }
+
+
     function thresholdCanvas(ctx, width, height) {
         const imageData = ctx.getImageData(0, 0, width, height)
 
         // greyscale thresholding
         const data = imageData.data
-        for (let i = 0; i < data.length; i++) {    
-            const dataOffset = i*4       
+        for (let i = 0; i < data.length; i++) {
+            const dataOffset = i*4
             const bitmapOffset = Math.floor(i / 8)
             const bitmapBitOffset = 7 - (i % 8)
-            if ((data[dataOffset] + data[dataOffset+1] + data[dataOffset+2]) / 3 > 150) {
+            if (rgbaThreshold(data, dataOffset)) {
                 data[dataOffset] = 255
                 data[dataOffset+1] = 255
                 data[dataOffset+2] = 255
@@ -900,11 +905,11 @@
 
     function convertImageToBitmap(imageData) {
         const bitmapData = new Uint8Array(new ArrayBuffer(canvas.width * canvas.height / 8))
-        for (let i = 0; i < imageData.length; i++) {    
+        for (let i = 0; i < imageData.length; i++) {
             const dataOffset = i*4
             const bitmapOffset = Math.floor(i / 8)
             const bitmapBitOffset = 7 - (i % 8)
-            if ((imageData[dataOffset] + imageData[dataOffset+1] + imageData[dataOffset+2]) / 3 > 150) {
+            if (rgbaThreshold(imageData, dataOffset)) {
                 bitmapData[bitmapOffset] = bitmapData[bitmapOffset] & ~(1<<bitmapBitOffset)
             } else {
                 bitmapData[bitmapOffset] = bitmapData[bitmapOffset] | (1<<bitmapBitOffset)
@@ -921,7 +926,7 @@
         x2 = x2 / scaleX
         y1 = y1 / scaleY
         y2 = y2 / scaleY
-        
+
         context.beginPath();
         context.moveTo(x1, y1);
         context.lineTo(x2, y2);
@@ -939,7 +944,7 @@
     document.querySelector('#set_image').addEventListener('click', async (e) => {
         e.preventDefault()
         const imageData = thresholdCanvas(canvasctx, canvas.width, canvas.height)
-        
+
         if (led) {
             const bitmapData = convertImageToBitmap(imageData)
             await led.setBitmap(bitmapData)
@@ -958,7 +963,7 @@
         canvas2.width = textMeasurement.width
         canvas2.style.letterSpacing = '-0.7px'
         ctx.fillStyle="white"
-        ctx.fillRect(0,0, canvas2.width, canvas2.height)
+        ctx.fillRect(0,0, Math.ceil(canvas2.width / canvas.width) * canvas.width, canvas2.height)
         ctx.fillStyle="black"
         ctx.font="normal 14px 'Comic Sans MS'"
         ctx.textBaseline="top"
@@ -971,7 +976,7 @@
         const frames = []
         for (let x = 0; x < canvas2.width; x += 48) {
             const imageData = ctx.getImageData(x, 0, canvas.width, canvas.height)
-            const bitmapData = convertImageToBitmap(imageData)
+            const bitmapData = convertImageToBitmap(imageData.data)
 
             frames.push(bitmapData)
         }
@@ -982,7 +987,7 @@
         console.log('set brightness', e.target.value)
         await led.setBrightness(e.target.value)
     })
-    
+
     document.querySelector('#display_mode').addEventListener('change', async (e) => {
         console.log('display_mode', e.target.value)
         await led.setScreenMode(e.target.value)
@@ -994,7 +999,7 @@
     })
 
     document.querySelector('#clear_canvas').addEventListener('click', (e) => {
-        canvasctx.fillStyle="white" 
+        canvasctx.fillStyle="white"
         canvasctx.fillRect(0, 0, canvas.width, canvas.height)
     })
 
@@ -1015,14 +1020,14 @@
             console.log('gatt server disconnected')
             document.querySelector('#connection_status').textContent = `Disconnected from ${device.name}`
         }
-        
+
         led = new SpotLED(device)
         await led.connect()
         document.querySelector('#connection_status').textContent = `Connected to ${device.name}`
         document.querySelector('#display_info').textContent = `${led.connection.displayInfo.width}x${led.connection.displayInfo.height}`
         canvas.width = led.connection.displayInfo.width
-        canvas.height = led.connection.displayInfo.height 
-        canvasctx.fillStyle="white" 
+        canvas.height = led.connection.displayInfo.height
+        canvasctx.fillStyle="white"
         canvasctx.fillRect(0, 0, canvas.width, canvas.height)
         document.querySelector('#brightness').value = led.connection.displayInfo.brightness
         document.querySelector('#brightness').disabled = false
