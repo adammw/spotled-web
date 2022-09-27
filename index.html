@@ -949,14 +949,16 @@
     document.querySelector('#set_time').addEventListener('click', async (e) => {
         const text = (new Date()).toLocaleString()
         const canvas2 = document.querySelector('#canvas2')
-        canvas2.style.letterSpacing = '-1px'
+        canvas2.style.letterSpacing = '-0.7px'
         const ctx = canvas2.getContext('2d')
         canvas2.height = 12
         ctx.font="normal 14px 'Comic Sans MS'"
         ctx.textBaseline="top"
         const textMeasurement = ctx.measureText(text)
         canvas2.width = textMeasurement.width
-        canvas2.style.letterSpacing = '-1px'
+        canvas2.style.letterSpacing = '-0.7px'
+        ctx.fillStyle="white"
+        ctx.fillRect(0,0, canvas2.width, canvas2.height)
         ctx.fillStyle="black"
         ctx.font="normal 14px 'Comic Sans MS'"
         ctx.textBaseline="top"
