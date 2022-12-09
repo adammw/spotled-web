@@ -7,6 +7,8 @@
         font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     }
 </style>
+<link rel="preconnect" href="https://fonts.gstatic.com">
+<link href="https://fonts.googleapis.com/css2?family=Silkscreen" rel="stylesheet">
 </head>
 <body>
     <p>
@@ -26,16 +28,29 @@
             <option>MIRROR_UPSIDE_DOWN</option>
         </select></label>
     </p>
-    <p><label>Set Text <input id="text" type="text" value="abc" /></label><button id="set_text" disabled>Set Text</button><button id="clear" disabled>Clear</button></p>
-    <p>
+    <fieldset>
+        <legend>Native Text</legend>
+        <p><label>Set Text <input id="text" type="text" value="abc" /></label><button id="set_text" disabled>Set Text</button><button id="clear" disabled>Clear</button></p>
+    </fieldset>
+    <fieldset>
+        <legend>Bitmap Text</legend>
+        <label for="font">Font</label>
+        <select name="font" id="font">
+            <option>Arial</option>
+            <option>Comic Sans MS</option>
+            <option selected>Silkscreen</option>
+        </select>
+        <p><label>Set Text <input id="text2" type="text" value="hello" maxlength="120" /></label><button id="set_text2">Set Text</button><button id="set_time">Set Time</button><button id="clear2">Clear</button></p>
+        <label>Speed: <input type="range" id="speed" min="1" max="200" value="20" disabled /></label>
+        <canvas id="canvas2" style="image-rendering: pixelated; border: 1px solid; width:100%" width="48" height="12"></canvas><br/>
+    </fieldset>
+    <fieldset>
+        <legend>Bitmap Drawing</legend>
         <canvas id="canvas" style="image-rendering: pixelated; border: 1px solid; width:100%" width="48" height="12"></canvas><br/>
         <label>Threshold Value <input type="range" min="0" max="255" value="120" id="threshold"></label><br>
         <input id="upload" type="file" accept="image/*" capture><button id="set_image">Set Image</button><button id="clear_canvas">Clear</button>
-    </p>
-    <p>
-        <canvas id="canvas2" style="image-rendering: pixelated; border: 1px solid; width:100%" width="48" height="12"></canvas><br/>
-        <button id="set_time">Set Time</button>
-    </p>
+    </fieldset>
+
 <script>
     function calcChecksum(data) {
         const v = new Uint8Array(data)
@@ -805,8 +820,10 @@
 
     let led = null
     const canvas = document.querySelector('#canvas')
-    const canvasctx = canvas.getContext('2d')
+    const canvasctx = canvas.getContext('2d', { willReadFrequently: true })
     canvasctx.imageSmoothingEnabled = false
+
+    const fontSelector = document.querySelector('#font')
 
     canvasctx.fillStyle="white"
     canvasctx.fillRect(0, 0, canvas.width, canvas.height)
@@ -977,6 +994,46 @@
         context.fillRect(Math.floor(x / scaleX),Math.floor(y / scaleY),1,1)
     }
 
+    async function drawText(text) {
+        const canvas2 = document.querySelector('#canvas2')
+        let letterSpacing = '-0.7px'
+        let yOffset = 0
+        if (fontSelector.value == "Silkscreen") {
+            yOffset = -2
+            letterSpacing = '-2px'
+        }
+
+        canvas2.style.letterSpacing = letterSpacing
+        const ctx = canvas2.getContext('2d', { willReadFrequently: true })
+        canvas2.height = 12
+        
+        ctx.font=`normal 16px '${fontSelector.value}'`
+        ctx.textBaseline="top"
+        const textMeasurement = ctx.measureText(text)
+        canvas2.width = textMeasurement.width
+        canvas2.style.letterSpacing = letterSpacing
+        ctx.fillStyle="white"
+        ctx.fillRect(0,0, Math.ceil(canvas2.width / canvas.width) * canvas.width, canvas2.height)
+        ctx.fillStyle="black"
+        ctx.font=`normal 16px '${fontSelector.value}'`
+        ctx.textBaseline="top"
+        ctx.fillText(text, 0, yOffset)
+        thresholdCanvas(ctx, canvas2.width, canvas2.height)
+        if (!led) {
+            return
+        }
+
+        const frames = []
+        for (let x = 0; x < canvas2.width; x += 48) {
+            const imageData = ctx.getImageData(x, 0, canvas.width, canvas.height)
+            const bitmapData = convertImageToBitmap(imageData.data)
+
+            frames.push(bitmapData)
+        }
+        const speed = document.querySelector('#speed').value
+        await led.setAnimation(frames, 1000, speed, 3)
+    }
+
     document.querySelector('#upload').addEventListener('change', async (e) => {
         await loadFile(e.target.files[0])
     })
@@ -991,36 +1048,13 @@
         }
     })
 
+    document.querySelector('#set_text2').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await drawText(document.querySelector('#text2').value)
+    })
+
     document.querySelector('#set_time').addEventListener('click', async (e) => {
-        const text = (new Date()).toLocaleString()
-        const canvas2 = document.querySelector('#canvas2')
-        canvas2.style.letterSpacing = '-0.7px'
-        const ctx = canvas2.getContext('2d')
-        canvas2.height = 12
-        ctx.font="normal 14px 'Comic Sans MS'"
-        ctx.textBaseline="top"
-        const textMeasurement = ctx.measureText(text)
-        canvas2.width = textMeasurement.width
-        canvas2.style.letterSpacing = '-0.7px'
-        ctx.fillStyle="white"
-        ctx.fillRect(0,0, Math.ceil(canvas2.width / canvas.width) * canvas.width, canvas2.height)
-        ctx.fillStyle="black"
-        ctx.font="normal 14px 'Comic Sans MS'"
-        ctx.textBaseline="top"
-        ctx.fillText(text, 0, 1)
-        thresholdCanvas(ctx, canvas2.width, canvas2.height)
-        if (!led) {
-            return
-        }
-
-        const frames = []
-        for (let x = 0; x < canvas2.width; x += 48) {
-            const imageData = ctx.getImageData(x, 0, canvas.width, canvas.height)
-            const bitmapData = convertImageToBitmap(imageData.data)
-
-            frames.push(bitmapData)
-        }
-        await led.setAnimation(frames, 1000, 50, 3)
+        await drawText((new Date()).toLocaleString())
     })
 
     document.querySelector('#brightness').addEventListener('change', async (e) => {
@@ -1071,6 +1105,7 @@
         canvasctx.fillRect(0, 0, canvas.width, canvas.height)
         document.querySelector('#brightness').value = led.connection.displayInfo.brightness
         document.querySelector('#brightness').disabled = false
+        document.querySelector('#speed').disabled = false
         document.querySelector('#display_mode').disabled = false
         document.querySelector('#set_text').disabled = false
         document.querySelector('#clear').disabled = false
