@@ -6,10 +6,25 @@
     body {
         font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     }
+    @font-face {
+        font-family: 'Bebas';
+        font-style: normal;
+        font-weight: 400;
+        src: local('Bebas'), local('Bebas-Regular'),
+            url(https://allfont.ru/cache/fonts/bebas_518334c99698c1e4ae561dbbcb898d6f.woff) format('woff'),
+            url(https://allfont.ru/cache/fonts/bebas_518334c99698c1e4ae561dbbcb898d6f.ttf) format('truetype');
+    }
+    @font-face {
+        font-family: 'Comic Sans MS';
+        font-style: normal;
+        font-weight: 400;
+        src: local('Comic Sans MS'), local('ComicSansMS-Regular'),
+            url(https://allfont.de/cache/fonts/comic-sans-ms_53a8778a817839ef2dbc5dc94ce14334.woff) format('woff'),
+            url(https://allfont.de/cache/fonts/comic-sans-ms_53a8778a817839ef2dbc5dc94ce14334.ttf) format('truetype');
+    }
 </style>
 <link rel="preconnect" href="https://fonts.gstatic.com">
 <link href="https://fonts.googleapis.com/css?family=Silkscreen" rel="stylesheet">
-<link href="https://allfont.net/allfont.css?fonts=comic-sans-ms" rel="stylesheet" type="text/css" />
 </head>
 <body>
     <p>
@@ -39,6 +54,7 @@
         <select name="font" id="font">
             <option>Arial</option>
             <option>Arial Black</option>
+            <option>Bebas</option>
             <option>Comic Sans MS</option>
             <option selected>Silkscreen</option>
         </select>
