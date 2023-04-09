@@ -8,7 +8,8 @@
     }
 </style>
 <link rel="preconnect" href="https://fonts.gstatic.com">
-<link href="https://fonts.googleapis.com/css2?family=Silkscreen" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css?family=Silkscreen" rel="stylesheet">
+<link href="https://allfont.net/allfont.css?fonts=comic-sans-ms" rel="stylesheet" type="text/css" />
 </head>
 <body>
     <p>
@@ -37,11 +38,14 @@
         <label for="font">Font</label>
         <select name="font" id="font">
             <option>Arial</option>
+            <option>Arial Black</option>
             <option>Comic Sans MS</option>
             <option selected>Silkscreen</option>
         </select>
         <p><label>Set Text <input id="text2" type="text" value="hello" maxlength="120" /></label><button id="set_text2">Set Text</button><button id="set_time">Set Time</button><button id="clear2">Clear</button></p>
-        <label>Speed: <input type="range" id="speed" min="1" max="200" value="20" disabled /></label>
+        <p><label>Font Size: <input type="range" id="font_size" min="10" max="20" value="16" step="0.5" /></label><span id="font_size_value">16px</span></p>
+        <p><label>Letter Spacing: <input type="range" id="letterSpacing" min="-5" max="5" value="-1" step="0.2" /></label><span id="letterSpacingValue">-1px</span></p>
+        <p><label>Speed: <input type="range" id="speed" min="1" max="200" value="20" disabled /></label></p>
         <canvas id="canvas2" style="image-rendering: pixelated; border: 1px solid; width:100%" width="48" height="12"></canvas><br/>
     </fieldset>
     <fieldset>
@@ -996,18 +1000,20 @@
 
     async function drawText(text) {
         const canvas2 = document.querySelector('#canvas2')
-        let letterSpacing = '-0.7px'
+        const letterSpacing = `${document.querySelector('#letterSpacing').value}px`
+        const fontSize = `${document.querySelector('#font_size').value}px`
+        // let letterSpacing = '-0.7px'
         let yOffset = 0
         if (fontSelector.value == "Silkscreen") {
             yOffset = -2
-            letterSpacing = '-2px'
+            // letterSpacing = '-2px'
         }
 
         canvas2.style.letterSpacing = letterSpacing
         const ctx = canvas2.getContext('2d', { willReadFrequently: true })
         canvas2.height = 12
         
-        ctx.font=`normal 16px '${fontSelector.value}'`
+        ctx.font=`normal ${fontSize} '${fontSelector.value}'`
         ctx.textBaseline="top"
         const textMeasurement = ctx.measureText(text)
         canvas2.width = textMeasurement.width
@@ -1015,7 +1021,7 @@
         ctx.fillStyle="white"
         ctx.fillRect(0,0, Math.ceil(canvas2.width / canvas.width) * canvas.width, canvas2.height)
         ctx.fillStyle="black"
-        ctx.font=`normal 16px '${fontSelector.value}'`
+        ctx.font=`normal ${fontSize} '${fontSelector.value}'`
         ctx.textBaseline="top"
         ctx.fillText(text, 0, yOffset)
         thresholdCanvas(ctx, canvas2.width, canvas2.height)
@@ -1080,6 +1086,14 @@
     document.querySelector('#clear').addEventListener('click', async (e) => {
         e.preventDefault()
         await led.clearDisplay()
+    })
+
+    document.querySelector('#font_size').addEventListener('input', (e) => {
+        document.querySelector('#font_size_value').textContent = `${e.target.value}px`
+    })
+
+    document.querySelector('#letterSpacing').addEventListener('input', (e) => {
+        document.querySelector('#letterSpacingValue').textContent = `${e.target.value}px`
     })
 
     document.querySelector('#search').addEventListener('click', async (e) => {
